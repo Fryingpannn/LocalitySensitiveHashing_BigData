@@ -44,6 +44,22 @@ def toCSVLine(data):
         return toCSVLineRDD(data.rdd)
     return None
 
+'''
+Get all the states and the plants they have.
+Returns RDD of items as (name of the state, {dictionary})
+'''
+def get_dict(plants_df):
+  # convert into rdd and split single string into list, first element is the plant
+  plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+  # re-order: (id, plant, [states])
+  plants_rdd = plants_rdd.map(lambda row: Row(plant=row[0], items=row[1:]))
+
+  # states & plants list
+  states_plants = plants_rdd.map(lambda row: (row['plant'], row['items'])).collect()
+
+  # use flat map to separate list returns into individual items. iterate list to create dictionary: (name of the state, {dictionary})
+  states_plants_final = plants_rdd.flatMap(lambda row: row[1]).distinct().map(lambda _state: (_state, {row[0]: (1 if _state in row[1] else 0) for row in states_plants}))
+  return states_plants_final
 
 def data_preparation(data_file, key, state):
     """Our implementation of LSH will be based on RDDs. As in the clustering
@@ -70,7 +86,35 @@ def data_preparation(data_file, key, state):
     key -- plant name
     state -- state abbreviation (see: all_states)
     """
-    raise Exception("Not implemented yet")
+    spark = init_spark()
+    # read data from file
+    plants_df = spark.read.text(data_file).na.drop()
+    # returns (name of the state, {dictionary of bool plants})
+    states_plants_final = get_dict(plants_df)
+    res = states_plants_final.filter(lambda row: row[0] == state).collect()[0][1][key]
+
+    return res
+
+
+def isPrime(n):
+    # Corner cases
+    if (n <= 1):
+        return False
+    if (n <= 3):
+        return True
+
+    # This is checked so that we can skip
+    # middle five numbers in below loop
+    if (n % 2 == 0 or n % 3 == 0):
+        return False
+
+    i = 5
+    while (i * i <= n):
+        if (n % i == 0 or n % (i + 2) == 0):
+            return False
+        i = i + 6
+
+    return True
 
 
 def primes(n, c):
@@ -85,7 +129,13 @@ def primes(n, c):
     n -- integer representing the number of consecutive prime numbers
     c -- minimum prime number value
     """
-    raise Exception("Not implemented yet")
+    primes = []
+    while n != 0:
+        if isPrime(c):
+            primes.append(c)
+            n -= 1
+        c += 1
+    return primes
 
 
 def hash_plants(s, m, p, x):
