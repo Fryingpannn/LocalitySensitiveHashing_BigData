@@ -5,7 +5,10 @@ from scipy.special import lambertw
 # Dask imports
 import dask.bag as db
 import dask.dataframe as df
-
+from pyspark.rdd import RDD
+from pyspark.sql import Row
+from pyspark.sql import DataFrame
+from pyspark.sql import functions as F
 
 all_states = ["ab", "ak", "ar", "az", "ca", "co", "ct", "de", "dc",
               "fl", "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la",
@@ -88,7 +91,7 @@ def data_preparation(data_file, key, state):
     """
     spark = init_spark()
     # read data from file
-    plants_df = spark.read.text(data_file).na.drop()
+    plants_df = spark.read.text(data_file)
     # returns (name of the state, {dictionary of bool plants})
     states_plants_final = get_dict(plants_df)
     res = states_plants_final.filter(lambda row: row[0] == state).collect()[0][1][key]
@@ -156,7 +159,11 @@ def hash_plants(s, m, p, x):
     p -- prime number
     x -- value to be hashed
     """
-    raise Exception("Not implemented yet")
+    random.seed(s)
+    a = random.randint(1, m)
+    b = random.randint(1, m)
+
+    return (a * x + b) % p
 
 
 def hash_list(s, m, n, i, x):
@@ -178,7 +185,40 @@ def hash_list(s, m, n, i, x):
     i -- index of hash function to use
     x -- value to hash
     """
-    raise Exception("Not implemented yet")
+    def hash_plants2(m, p, x):
+        a = random.randint(1, m)
+        b = random.randint(1, m)
+
+        return (a * x + b) % p
+
+    random.seed(s)
+    hashes = []
+    # get list of primes
+    primes_list = primes(n, m)
+    for p in primes_list:
+        hashes.append(hash_plants2(m, p, x))
+
+    return hashes[i]
+
+
+# helper function for hash_list2: return 1 h(x)
+def hash_plants2(m, p):
+    a = random.randint(1, m)
+    b = random.randint(1, m)
+
+    return lambda x: (a * x + b) % p
+
+
+# return list of hash functions
+# takes in a list of integers (x)
+def hash_list2(m, n):
+    hashes = []
+    # get list of primes
+    primes_list = primes(n, m)
+
+    for p in primes_list:
+        hashes.append(hash_plants2(m, p))
+    return hashes
 
 
 def signatures(datafile, seed, n, state):
@@ -216,7 +256,40 @@ def signatures(datafile, seed, n, state):
     n -- number of hash functions to generate
     state -- state abbreviation
     """
-    raise Exception("Not implemented yet")
+    spark = init_spark()
+    plants_df = spark.read.text(datafile)
+    m = plants_df.count()
+    state_dict = plants_df.rdd.map(lambda data: data["value"].split(",")).map(list)
+    state_dict = state_dict.map(lambda data: (
+    data[0], dict([(i, 1) if i in data[1:] else (i, 0) for i in all_states]))).sortByKey().zipWithIndex()
+
+    state_row = state_dict.map(lambda tup: (tup[0][1][state], tup[1]))
+    # only keep those with 1
+    state_row = state_row.filter(lambda x: x[0] == 1).map(lambda y: y[1]).collect()
+
+    random.seed(seed)
+    primes_list = primes(n, m)
+    def hash_plant(m, p):
+        a = random.randint(1, m)
+        b = random.randint(1, m)
+        return lambda x: (a * x + b) % p
+    # get hash functions
+    hash_list = [hash_plant(m, p) for p in primes_list]
+
+    def min_hash(row):
+      sigcol = []
+      for i in range(len(hash_list)):
+        min = float('inf')
+        for k in range(len(row)):
+          temp = hash_list[i](row[k])
+          if temp < min:
+            min = temp
+        sigcol.append(min)
+      return sigcol
+
+    hashed_rows = min_hash(state_row)
+    answer = dict(list(enumerate(hashed_rows)))
+    return answer
 
 
 def hash_band(datafile, seed, state, n, b, n_r):
@@ -245,7 +318,31 @@ def hash_band(datafile, seed, state, n, b, n_r):
     b -- the band index
     n_r -- the number of rows
     """
-    raise Exception("Not implemented yet")
+    spark = init_spark()
+    plants_df = spark.read.text(datafile)
+    m = plants_df.count()
+    state_dict = plants_df.rdd.map(lambda data: data["value"].split(",")).map(list)
+    state_dict = state_dict.map(lambda data: (
+    data[0], dict([(i, 1) if i in data[1:] else (i, 0) for i in all_states]))).sortByKey().zipWithIndex()
+
+    state_row = state_dict.map(lambda tup: (tup[0][1][state], tup[1]))
+    # only keep those with 1
+    state_row = state_row.filter(lambda x: x[0] == 1).map(lambda y: y[1]).collect()
+
+    random.seed(seed)
+    primes_list = primes(n, m)
+    def hash_plant(m, p):
+        a = random.randint(1, m)
+        b = random.randint(1, m)
+        return lambda x: (a * x + b) % p
+    # get hash functions
+    hash_list = [hash_plant(m, p) for p in primes_list]
+    all_columns = [[hfunc(x) for x in state_row] for hfunc in hash_list]
+    answer = dict()
+    for index, item in enumerate(all_columns):
+        answer[index] = (min(item))
+    result = {i: answer[i] for i in list(filter(lambda x: x in range(b*n_r, (b+1)*n_r), answer))}
+    return hash(str(result))
 
 
 def hash_bands(data_file, seed, n_b, n_r):
@@ -273,7 +370,37 @@ def hash_bands(data_file, seed, n_b, n_r):
     n_b -- the number of bands
     n_r -- the number of rows in a given band
     """
-    raise Exception("Not implemented yet")
+    spark = init_spark()
+    plants_df = spark.read.text(data_file)
+    m = plants_df.count()
+    n = n_b * n_r
+    state_dict = plants_df.rdd.map(lambda data: data["value"].split(",")).map(list)
+    state_dict = state_dict.map(lambda data: (
+    data[0], dict([(i, 1) if i in data[1:] else (i, 0) for i in all_states]))).sortByKey().zipWithIndex()
+
+    random.seed(seed)
+    primes_list = primes(n, m)
+    def hash_plant(m, p):
+        a = random.randint(1, m)
+        b = random.randint(1, m)
+        return lambda x: (a * x + b) % p
+    # get hash functions
+    hash_list = [hash_plant(m, p) for p in primes_list]
+
+    state_row = state_dict.flatMap(lambda tup: [(state, tup[0][1][state], tup[1]) for state in all_states])
+    # only keep those with 1
+    state_row = state_row.filter(lambda x: x[1] == 1).map(lambda y: (y[0], y[2])).groupByKey().mapValues(list)
+    state_row = state_row.map(lambda x: (x[0], [[hfunc(index) for index in x[1]] for hfunc in hash_list]))
+    sigs = state_row.map(lambda x: (x[0], {i: min(vals) for i, vals in enumerate(x[1])}))
+    bands = sigs.flatMap(lambda x: [((b, hash(str({i: x[1][i] for i in list(filter(lambda x: x in range(b * n_r, (b + 1) * n_r), x[1]))}))), x[0]) for b in range(n_b)]).groupByKey().mapValues(list)
+    bands = bands.filter(lambda x: len(x[1]) >= 2).sortByKey()
+    answer = bands.map(lambda x: (x[0][0], x[1])).groupByKey().mapValues(list)
+    answer = dict(answer.collect())
+
+    for key in answer:
+        for bucket in answer[key]:
+            bucket.sort()
+    return answer
 
 
 def get_b_and_r(n, s):
