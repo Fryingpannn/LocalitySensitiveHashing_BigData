@@ -8,7 +8,6 @@ import dask.dataframe as df
 from pyspark.rdd import RDD
 from pyspark.sql import Row
 from pyspark.sql import DataFrame
-from pyspark.sql import functions as F
 
 all_states = ["ab", "ak", "ar", "az", "ca", "co", "ct", "de", "dc",
               "fl", "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la",
