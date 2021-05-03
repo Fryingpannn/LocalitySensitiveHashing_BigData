@@ -1,3 +1,5 @@
+from math import log, floor
+
 from pyspark.sql import SparkSession
 from pretty_print_dict import pretty_print_dict as ppd
 import random
@@ -424,4 +426,12 @@ def get_b_and_r(n, s):
     n -- the number of hash functions
     s -- the similarity threshold
     """
-    raise Exception("Not implemented yet")
+    z = -n * log(s)
+    b = floor(z / lambertw(z))
+    r = floor(n / b)
+    n_real = b * r
+    s_real = (1 / b) ** (1 / r)
+    print(z / lambertw(z), b, r, n_real, s_real)
+
+    return "b={0}\nr={1}\nn_real={2}\ns_real={3}\n" \
+        .format(b, r, n_real, s_real)
